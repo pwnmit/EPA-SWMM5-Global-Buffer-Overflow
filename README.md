@@ -78,7 +78,7 @@ Step 3: Launch Verification Wrapper
 ```
 ./exploit.py
 ```
-(POC(https://github.com/pwnmit/EPA-SWMM5-Global-Buffer-Overflow/blob/main/SWMM_poc.png))
+![PoC](SWMM_poc.png)
 ### 🔧 Mitigations & Code Fix
 
 To resolve the memory boundary breach, the insecure strcpy() call must be replaced with strict length-restricted memory assignment functions.
