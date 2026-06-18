@@ -1,0 +1,95 @@
+# EPA SWMM5 Computational Engine Global Buffer Overflow (CWE-787)
+
+An out-of-bounds memory write vulnerability (Global Buffer Overflow) has been discovered in the EPA Stormwater Management Model (SWMM5) computational core solver architecture (affecting versions up to and including v5.2.4). The flaw resides within the solver's error logging subsystem, where unvalidated string compilation tokens are handled via unbounded memory copy routines. Processing a maliciously crafted configuration file (`.inp`) triggers a denial-of-service (DoS) condition via an immediate segmentation fault (`SIGSEGV`).
+
+---
+
+## 🔒 Vulnerability Metadata
+* **Vulnerability Type:** Out-of-bounds Write / Global Buffer Overflow ([CWE-787](https://cwe.mitre.org/data/definitions/787.html))
+* **Component Affected:** `src/solver/error.c` -> `error_setInpError()`
+* **Vector Execution:** Local File Ingestion (`.inp` parsing configuration)
+* **Impact:** Availability / Process Failure / Application Denial of Service (DoS)
+* **Discovered By:** mit (pwnmit Security Research)
+
+---
+
+## 🔍 Technical Analysis & Root Cause
+
+The SWMM5 parser architecture isolates spatial and physical input properties using strictly structured data allocations. However, a logical boundary check mismatch occurs during syntax exception handling when evaluating application configurations inside `src/solver/treatmnt.c`.
+
+### 1. Data Aggregation and Validation Failure (`treatmnt.c`)
+During treatment sequence evaluation, configuration arguments are read and concatenated up to the maximum permitted line bounds (`MAXLINE`):
+
+```c
+sstrncpy(s, tok[2], MAXLINE);
+for (i = 3; i < ntoks; i++) {
+    sstrcat(s, " ", MAXLINE);
+    sstrcat(s, tok[i], MAXLINE);
+}
+...
+else return error_setInpError(ERR_KEYWORD, tok[2]);
+
+## If keyword parsing constraints fail (e.g., structural character layouts violate validation markers), the engine immediately falls back to error propagation. It routes the raw, unvalidated configuration argument reference string (tok[2]) to the central logging sub-tier via error_setInpError().
+2. Unbounded Memory Ingestion (error.c)
+
+The target exception logging module allocates a global tracking buffer, ErrString, with a fixed storage limit of 256 bytes in the uninitialized data segment (.bss):
+C
+
+char  ErrString[256];
+...
+int  error_setInpError(int errcode, char* s)
+{
+    strcpy(ErrString, s); // Vulnerable Unbounded Memory Copy
+    return errcode;
+}
+
+Because strcpy() performs byte serialization mapping sequentially until a null-terminator (\0) is found without validating variable lengths, incoming input sequences exceeding 256 bytes break bounds containment. This directly corrupts adjacent static registers in the .bss memory region, throwing an address violation trap (SIGSEGV) and causing an immediate application abort.
+📊 Compilation Instrumentation & AddressSanitizer Logs
+
+Compiling the engine executable with AddressSanitizer (ASan) tracking directives exposes the exact memory offset collision when the bug is triggered:
+Plaintext
+
+=================================================================
+==3484==ERROR: AddressSanitizer: global-buffer-overflow on address 0x7f34a6df0fe0 at pc 0x7f34a6ea2681 bp 0x7ffdfa8c2a00 sp 0x7ffdfa8c21c0
+WRITE of size 996 at 0x7f34a6df0fe0 thread T0
+    #0 0x7f34a6ea2680 in strcpy ../../../../src/libsanitizer/asan/asan_interceptors.cpp:563
+    #1 0x7f34a6c93452 in error_setInpError /src/solver/error.c:47
+    #2 0x7f34a6d87b50 in treatmnt_readExpression /src/solver/treatmnt.c:134
+    #3 0x7f34a6cc52af in parseLine /src/solver/input.c:596
+
+0x7f34a6df0fe0 is located 0 bytes after global variable 'ErrString' defined in 'error.c:28:7' of size 256
+SUMMARY: AddressSanitizer: global-buffer-overflow in strcpy
+==3484==ABORTING
+
+
+If keyword parsing constraints fail (e.g., structural character layouts violate validation markers), the engine immediately falls back to error propagation. It routes the raw, unvalidated configuration argument reference string (tok[2]) to the central logging sub-tier via error_setInpError().
+2. Unbounded Memory Ingestion (error.c)
+
+The target exception logging module allocates a global tracking buffer, ErrString, with a fixed storage limit of 256 bytes in the uninitialized data segment (.bss):
+C
+
+char  ErrString[256];
+...
+int  error_setInpError(int errcode, char* s)
+{
+    strcpy(ErrString, s); // Vulnerable Unbounded Memory Copy
+    return errcode;
+}
+
+Because strcpy() performs byte serialization mapping sequentially until a null-terminator (\0) is found without validating variable lengths, incoming input sequences exceeding 256 bytes break bounds containment. This directly corrupts adjacent static registers in the .bss memory region, throwing an address violation trap (SIGSEGV) and causing an immediate application abort.
+📊 Compilation Instrumentation & AddressSanitizer Logs
+
+Compiling the engine executable with AddressSanitizer (ASan) tracking directives exposes the exact memory offset collision when the bug is triggered:
+Plaintext
+
+=================================================================
+==3484==ERROR: AddressSanitizer: global-buffer-overflow on address 0x7f34a6df0fe0 at pc 0x7f34a6ea2681 bp 0x7ffdfa8c2a00 sp 0x7ffdfa8c21c0
+WRITE of size 996 at 0x7f34a6df0fe0 thread T0
+    #0 0x7f34a6ea2680 in strcpy ../../../../src/libsanitizer/asan/asan_interceptors.cpp:563
+    #1 0x7f34a6c93452 in error_setInpError /src/solver/error.c:47
+    #2 0x7f34a6d87b50 in treatmnt_readExpression /src/solver/treatmnt.c:134
+    #3 0x7f34a6cc52af in parseLine /src/solver/input.c:596
+
+0x7f34a6df0fe0 is located 0 bytes after global variable 'ErrString' defined in 'error.c:28:7' of size 256
+SUMMARY: AddressSanitizer: global-buffer-overflow in strcpy
+==3484==ABORTING
