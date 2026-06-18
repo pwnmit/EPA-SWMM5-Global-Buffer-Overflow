@@ -62,7 +62,7 @@ SUMMARY: AddressSanitizer: global-buffer-overflow in strcpy
 ==3484==ABORTING
 
 
-If keyword parsing constraints fail (e.g., structural character layouts violate validation markers), the engine immediately falls back to error propagation. It routes the raw, unvalidated configuration argument reference string (tok[2]) to the central logging sub-tier via error_setInpError().
+## If keyword parsing constraints fail (e.g., structural character layouts violate validation markers), the engine immediately falls back to error propagation. It routes the raw, unvalidated configuration argument reference string (tok[2]) to the central logging sub-tier via error_setInpError().
 2. Unbounded Memory Ingestion (error.c)
 
 The target exception logging module allocates a global tracking buffer, ErrString, with a fixed storage limit of 256 bytes in the uninitialized data segment (.bss):
